@@ -1,5 +1,7 @@
 # Video Transcription App
 
+![Demo](demo.gif)
+
 A full-stack application for transcribing video and audio files using OpenAI's Whisper AI model.
 
 ## Architecture
