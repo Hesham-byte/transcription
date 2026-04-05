@@ -4,7 +4,7 @@ import { useState, useCallback, useRef } from "react";
 
 interface TranscriptionJob {
   jobId: string;
-  status: "pending" | "processing" | "completed" | "failed";
+  status: "pending" | "downloading" | "processing" | "completed" | "failed";
   text: string | null;
   error: string | null;
   filename: string;
@@ -411,16 +411,69 @@ export default function Home() {
               </div>
             </div>
 
-            {(job.status === "pending" || job.status === "processing") && (
-              <div className="mb-6">
-                <div className="h-2 overflow-hidden rounded-full bg-slate-700">
-                  <div className="h-full animate-pulse rounded-full bg-linear-to-r from-blue-500 to-blue-400" style={{ width: job.status === "processing" ? "70%" : "30%" }} />
+            {(job.status === "pending" || job.status === "processing" || job.status === "downloading") && (
+              <div className="mb-6 py-4">
+                {/* Animated Loader */}
+                <div className="mb-6 flex justify-center">
+                  {job.status === "downloading" ? (
+                    <div className="relative flex h-20 w-20 items-center justify-center">
+                      <div className="absolute inset-0 rounded-full border-4 border-slate-700"></div>
+                      <div className="absolute inset-0 animate-spin rounded-full border-4 border-blue-500 border-t-transparent"></div>
+                      <svg className="h-8 w-8 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                      </svg>
+                    </div>
+                  ) : job.status === "processing" ? (
+                    <div className="flex items-end gap-1">
+                      {[1, 2, 3, 4, 5].map((bar) => (
+                        <div
+                          key={bar}
+                          className="w-2 animate-pulse rounded-t bg-blue-400"
+                          style={{
+                            height: "40px",
+                            animationDelay: `${bar * 0.1}s`,
+                            animationDuration: "0.6s",
+                          }}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="relative flex h-20 w-20 items-center justify-center">
+                      <div className="absolute h-20 w-20 animate-ping rounded-full bg-blue-500/30"></div>
+                      <div className="relative flex h-16 w-16 items-center justify-center rounded-full bg-slate-800">
+                        <svg className="h-8 w-8 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <p className="mt-2 text-sm text-slate-400">
-                  {job.status === "processing"
-                    ? "AI is transcribing your audio..."
-                    : "Waiting in queue..."}
-                </p>
+
+                {/* Progress Bar */}
+                <div className="mb-4 h-3 overflow-hidden rounded-full bg-slate-700">
+                  <div 
+                    className={`h-full rounded-full bg-linear-to-r from-blue-500 to-blue-400 transition-all duration-1000 ${
+                      job.status === "processing" ? "animate-pulse" : job.status === "downloading" ? "animate-pulse" : ""
+                    }`}
+                    style={{ 
+                      width: job.status === "processing" ? "80%" : job.status === "downloading" ? "50%" : "30%",
+                    }} 
+                  />
+                </div>
+
+                {/* Status Text */}
+                <div className="text-center">
+                  <p className="text-lg font-medium text-white">
+                    {job.status === "processing" && "AI is transcribing your audio..."}
+                    {job.status === "downloading" && "Downloading video..."}
+                    {job.status === "pending" && "Waiting in queue..."}
+                  </p>
+                  <p className="mt-1 text-sm text-slate-400">
+                    {job.status === "processing" && "This may take a few minutes depending on video length"}
+                    {job.status === "downloading" && "Fetching video from URL..."}
+                    {job.status === "pending" && "Your job is queued and will start soon"}
+                  </p>
+                </div>
               </div>
             )}
 
