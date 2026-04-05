@@ -1,9 +1,6 @@
 import os
 import uuid
-import subprocess
 import whisper
-import yt_dlp
-import requests
 from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -47,11 +44,6 @@ class TranscriptionStatus(BaseModel):
     status: str
     text: Optional[str] = None
     error: Optional[str] = None
-    filename: Optional[str] = None
-
-
-class URLInput(BaseModel):
-    url: str
     filename: Optional[str] = None
 
 
@@ -188,118 +180,3 @@ async def transcribe_video_sync(file: UploadFile = File(...)):
         if os.path.exists(file_path):
             os.remove(file_path)
         raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
-
-
-@app.post("/transcribe/url", response_model=TranscriptionResponse)
-async def transcribe_from_url(
-    background_tasks: BackgroundTasks,
-    url_input: URLInput
-):
-    """
-    Transcribe a video from a URL (YouTube, direct video link, etc.).
-    Returns immediately with a job_id to poll for results.
-    """
-    job_id = str(uuid.uuid4())
-    file_path = os.path.join(UPLOAD_DIR, f"{job_id}.mp4")
-    
-    # Initialize job status
-    transcription_jobs[job_id] = {
-        "status": "pending",
-        "filename": url_input.filename or "video_from_url",
-        "text": None,
-        "error": None
-    }
-    
-    # Start background download and transcription
-    background_tasks.add_task(process_url_transcription, job_id, url_input.url, file_path)
-    
-    return TranscriptionResponse(job_id=job_id, status="pending")
-
-
-def process_url_transcription(job_id: str, url: str, file_path: str):
-    """Background task to stream video from URL using ffmpeg and transcribe."""
-    audio_path = file_path.rsplit('.', 1)[0] + '.mp3'
-    
-    try:
-        transcription_jobs[job_id]["status"] = "downloading"
-        
-        # Use ffmpeg to stream from URL and extract audio directly
-        # This avoids downloading the full video file
-        ffmpeg_cmd = [
-            'ffmpeg',
-            '-i', url,           # Input from URL (stream)
-            '-vn',               # No video
-            '-acodec', 'libmp3lame',
-            '-ar', '16000',      # Sample rate that whisper prefers
-            '-ac', '1',          # Mono audio
-            '-q:a', '2',         # Quality
-            '-y',                # Overwrite output
-            audio_path
-        ]
-        
-        try:
-            # Run ffmpeg to extract audio from stream
-            result = subprocess.run(
-                ffmpeg_cmd,
-                capture_output=True,
-                text=True,
-                timeout=300  # 5 minute timeout
-            )
-            
-            if result.returncode != 0:
-                # If ffmpeg fails (e.g., unsupported URL), try yt-dlp as fallback
-                raise Exception(f"ffmpeg failed: {result.stderr}")
-                
-        except Exception as ffmpeg_error:
-            # Fallback: try yt-dlp for YouTube/other platforms
-            transcription_jobs[job_id]["status"] = "downloading"
-            
-            ydl_opts = {
-                'format': 'bestaudio/best',
-                'outtmpl': audio_path,
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': '192',
-                }],
-                'quiet': True,
-                'no_warnings': True,
-                'user_agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'referer': 'https://www.google.com/',
-                'headers': {
-                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                    'Accept-Language': 'en-US,en;q=0.5',
-                },
-                'cookiefile': None,  # Add cookies if you have them
-            }
-            
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
-        
-        # Check if audio file was created
-        if not os.path.exists(audio_path):
-            raise Exception("Failed to extract audio from URL")
-        
-        transcription_jobs[job_id]["status"] = "processing"
-        
-        # Transcribe the audio
-        result = model.transcribe(audio_path)
-        
-        transcription_jobs[job_id]["status"] = "completed"
-        transcription_jobs[job_id]["text"] = result["text"]
-        transcription_jobs[job_id]["segments"] = result.get("segments", [])
-        
-        # Cleanup
-        if os.path.exists(audio_path):
-            os.remove(audio_path)
-        if os.path.exists(file_path):
-            os.remove(file_path)
-        
-    except Exception as e:
-        transcription_jobs[job_id]["status"] = "failed"
-        transcription_jobs[job_id]["error"] = str(e)
-        if os.path.exists(audio_path):
-            os.remove(audio_path)
-        if os.path.exists(file_path):
-            os.remove(file_path)
