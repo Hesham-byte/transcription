@@ -4,18 +4,14 @@ import { useState, useCallback, useRef } from "react";
 
 interface TranscriptionJob {
   jobId: string;
-  status: "pending" | "downloading" | "processing" | "completed" | "failed";
+  status: "pending" | "processing" | "completed" | "failed";
   text: string | null;
   error: string | null;
   filename: string;
 }
 
-type InputMode = "file" | "url";
-
 export default function Home() {
   const [file, setFile] = useState<File | null>(null);
-  const [url, setUrl] = useState<string>("");
-  const [inputMode, setInputMode] = useState<InputMode>("file");
   const [job, setJob] = useState<TranscriptionJob | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -130,52 +126,9 @@ export default function Home() {
 
   const clearAll = () => {
     setFile(null);
-    setUrl("");
     setJob(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
-    }
-  };
-
-  const handleUrlSubmit = async () => {
-    if (!url.trim()) return;
-
-    setIsUploading(true);
-
-    try {
-      const response = await fetch("http://localhost:8000/transcribe/url", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ url: url.trim(), filename: "video_from_url" }),
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to start URL transcription");
-      }
-
-      const data = await response.json();
-      setJob({
-        jobId: data.job_id,
-        status: "pending",
-        text: null,
-        error: null,
-        filename: "Video from URL",
-      });
-
-      pollStatus(data.job_id);
-    } catch (error) {
-      console.error("URL submission error:", error);
-      setJob({
-        jobId: "",
-        status: "failed",
-        text: null,
-        error: "Failed to start transcription from URL. Please try again.",
-        filename: "Video from URL",
-      });
-    } finally {
-      setIsUploading(false);
     }
   };
 
@@ -201,168 +154,85 @@ export default function Home() {
 
         {!job && (
           <div className="mb-8">
-            {/* Input Mode Toggle */}
-            <div className="mb-6 flex justify-center">
-              <div className="flex rounded-xl bg-slate-800 p-1">
-                <button
-                  onClick={() => setInputMode("file")}
-                  className={`flex items-center gap-2 rounded-lg px-6 py-3 font-medium transition-all ${
-                    inputMode === "file"
-                      ? "bg-blue-500 text-white"
-                      : "text-slate-400 hover:text-white"
-                  }`}
-                >
-                  <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  Upload File
-                </button>
-                <button
-                  onClick={() => setInputMode("url")}
-                  className={`flex items-center gap-2 rounded-lg px-6 py-3 font-medium transition-all ${
-                    inputMode === "url"
-                      ? "bg-blue-500 text-white"
-                      : "text-slate-400 hover:text-white"
-                  }`}
-                >
-                  <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                  </svg>
-                  Video URL
-                </button>
-              </div>
-            </div>
+            <div
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              className={`cursor-pointer rounded-2xl border-2 border-dashed p-12 text-center transition-all duration-200 ${
+                isDragging
+                  ? "border-blue-400 bg-blue-400/10"
+                  : file
+                  ? "border-green-400 bg-green-400/10"
+                  : "border-slate-600 bg-slate-800/50 hover:border-slate-500 hover:bg-slate-800"
+              }`}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".mp4,.mp3,.wav,.m4a,.webm,.mov,.mkv,.avi,.flac,.ogg,video/*,audio/*"
+                onChange={handleFileSelect}
+                className="hidden"
+              />
 
-            {inputMode === "file" ? (
-              <>
-                <div
-                  onDragOver={handleDragOver}
-                  onDragLeave={handleDragLeave}
-                  onDrop={handleDrop}
-                  onClick={() => fileInputRef.current?.click()}
-                  className={`cursor-pointer rounded-2xl border-2 border-dashed p-12 text-center transition-all duration-200 ${
-                    isDragging
-                      ? "border-blue-400 bg-blue-400/10"
-                      : file
-                      ? "border-green-400 bg-green-400/10"
-                      : "border-slate-600 bg-slate-800/50 hover:border-slate-500 hover:bg-slate-800"
-                  }`}
-                >
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".mp4,.mp3,.wav,.m4a,.webm,.mov,.mkv,.avi,.flac,.ogg,video/*,audio/*"
-                    onChange={handleFileSelect}
-                    className="hidden"
-                  />
-
-                  {!file ? (
-                    <div className="space-y-4">
-                      <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-slate-700">
-                        <svg className="h-10 w-10 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                        </svg>
-                      </div>
-                      <div>
-                        <p className="text-lg font-medium text-white">
-                          Drop your file here, or click to browse
-                        </p>
-                        <p className="mt-2 text-sm text-slate-400">
-                          Supports MP4, MP3, WAV, M4A, WebM, MOV, MKV, AVI, FLAC, OGG
-                        </p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-green-500/20">
-                        <svg className="h-10 w-10 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
-                      </div>
-                      <div>
-                        <p className="text-lg font-medium text-white">{file.name}</p>
-                        <p className="text-sm text-slate-400">{formatFileSize(file.size)}</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {file && (
-                  <div className="mt-6 flex gap-4">
-                    <button
-                      onClick={handleUpload}
-                      disabled={isUploading}
-                      className="flex-1 rounded-xl bg-blue-500 px-6 py-4 font-semibold text-white transition-all hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {isUploading ? (
-                        <span className="flex items-center justify-center gap-2">
-                          <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                          </svg>
-                          Uploading...
-                        </span>
-                      ) : (
-                        "Start Transcription"
-                      )}
-                    </button>
-                    <button
-                      onClick={clearAll}
-                      disabled={isUploading}
-                      className="rounded-xl border-2 border-slate-600 px-6 py-4 font-semibold text-slate-300 transition-all hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      Cancel
-                    </button>
+              {!file ? (
+                <div className="space-y-4">
+                  <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-slate-700">
+                    <svg className="h-10 w-10 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
                   </div>
-                )}
-              </>
-            ) : (
-              <>
-                <div className="rounded-2xl border-2 border-slate-600 bg-slate-800/50 p-8">
-                  <div className="mb-4">
-                    <label className="mb-2 block text-sm font-medium text-slate-300">
-                      Video URL
-                    </label>
-                    <input
-                      type="url"
-                      value={url}
-                      onChange={(e) => setUrl(e.target.value)}
-                      placeholder="https://youtube.com/watch?v=... or https://example.com/video.mp4"
-                      className="w-full rounded-xl border border-slate-600 bg-slate-900 px-4 py-3 text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                    />
+                  <div>
+                    <p className="text-lg font-medium text-white">
+                      Drop your file here, or click to browse
+                    </p>
                     <p className="mt-2 text-sm text-slate-400">
-                      Supports YouTube, Vimeo, or direct video file links
+                      Supports MP4, MP3, WAV, M4A, WebM, MOV, MKV, AVI, FLAC, OGG
                     </p>
                   </div>
                 </div>
-
-                <div className="mt-6 flex gap-4">
-                  <button
-                    onClick={handleUrlSubmit}
-                    disabled={isUploading || !url.trim()}
-                    className="flex-1 rounded-xl bg-blue-500 px-6 py-4 font-semibold text-white transition-all hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {isUploading ? (
-                      <span className="flex items-center justify-center gap-2">
-                        <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                        </svg>
-                        Processing...
-                      </span>
-                    ) : (
-                      "Start Transcription"
-                    )}
-                  </button>
-                  <button
-                    onClick={clearAll}
-                    disabled={isUploading}
-                    className="rounded-xl border-2 border-slate-600 px-6 py-4 font-semibold text-slate-300 transition-all hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Cancel
-                  </button>
+              ) : (
+                <div className="space-y-4">
+                  <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-green-500/20">
+                    <svg className="h-10 w-10 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="text-lg font-medium text-white">{file.name}</p>
+                    <p className="text-sm text-slate-400">{formatFileSize(file.size)}</p>
+                  </div>
                 </div>
-              </>
+              )}
+            </div>
+
+            {file && (
+              <div className="mt-6 flex gap-4">
+                <button
+                  onClick={handleUpload}
+                  disabled={isUploading}
+                  className="flex-1 rounded-xl bg-blue-500 px-6 py-4 font-semibold text-white transition-all hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isUploading ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Uploading...
+                    </span>
+                  ) : (
+                    "Start Transcription"
+                  )}
+                </button>
+                <button
+                  onClick={clearAll}
+                  disabled={isUploading}
+                  className="rounded-xl border-2 border-slate-600 px-6 py-4 font-semibold text-slate-300 transition-all hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </div>
             )}
           </div>
         )}
@@ -411,19 +281,11 @@ export default function Home() {
               </div>
             </div>
 
-            {(job.status === "pending" || job.status === "processing" || job.status === "downloading") && (
+            {(job.status === "pending" || job.status === "processing") && (
               <div className="mb-6 py-4">
                 {/* Animated Loader */}
                 <div className="mb-6 flex justify-center">
-                  {job.status === "downloading" ? (
-                    <div className="relative flex h-20 w-20 items-center justify-center">
-                      <div className="absolute inset-0 rounded-full border-4 border-slate-700"></div>
-                      <div className="absolute inset-0 animate-spin rounded-full border-4 border-blue-500 border-t-transparent"></div>
-                      <svg className="h-8 w-8 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                      </svg>
-                    </div>
-                  ) : job.status === "processing" ? (
+                  {job.status === "processing" ? (
                     <div className="flex items-end gap-1">
                       {[1, 2, 3, 4, 5].map((bar) => (
                         <div
@@ -453,10 +315,10 @@ export default function Home() {
                 <div className="mb-4 h-3 overflow-hidden rounded-full bg-slate-700">
                   <div 
                     className={`h-full rounded-full bg-linear-to-r from-blue-500 to-blue-400 transition-all duration-1000 ${
-                      job.status === "processing" ? "animate-pulse" : job.status === "downloading" ? "animate-pulse" : ""
+                      job.status === "processing" ? "animate-pulse" : ""
                     }`}
                     style={{ 
-                      width: job.status === "processing" ? "80%" : job.status === "downloading" ? "50%" : "30%",
+                      width: job.status === "processing" ? "80%" : "30%",
                     }} 
                   />
                 </div>
@@ -465,12 +327,10 @@ export default function Home() {
                 <div className="text-center">
                   <p className="text-lg font-medium text-white">
                     {job.status === "processing" && "AI is transcribing your audio..."}
-                    {job.status === "downloading" && "Downloading video..."}
                     {job.status === "pending" && "Waiting in queue..."}
                   </p>
                   <p className="mt-1 text-sm text-slate-400">
                     {job.status === "processing" && "This may take a few minutes depending on video length"}
-                    {job.status === "downloading" && "Fetching video from URL..."}
                     {job.status === "pending" && "Your job is queued and will start soon"}
                   </p>
                 </div>
