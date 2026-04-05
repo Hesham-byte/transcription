@@ -1,5 +1,6 @@
 import os
 import uuid
+import subprocess
 import whisper
 import yt_dlp
 import requests
@@ -216,63 +217,81 @@ async def transcribe_from_url(
 
 
 def process_url_transcription(job_id: str, url: str, file_path: str):
-    """Background task to download video from URL and transcribe."""
+    """Background task to stream video from URL using ffmpeg and transcribe."""
+    audio_path = file_path.rsplit('.', 1)[0] + '.mp3'
+    
     try:
         transcription_jobs[job_id]["status"] = "downloading"
         
-        # Try yt-dlp first (for YouTube and other platforms)
+        # Use ffmpeg to stream from URL and extract audio directly
+        # This avoids downloading the full video file
+        ffmpeg_cmd = [
+            'ffmpeg',
+            '-i', url,           # Input from URL (stream)
+            '-vn',               # No video
+            '-acodec', 'libmp3lame',
+            '-ar', '16000',      # Sample rate that whisper prefers
+            '-ac', '1',          # Mono audio
+            '-q:a', '2',         # Quality
+            '-y',                # Overwrite output
+            audio_path
+        ]
+        
         try:
+            # Run ffmpeg to extract audio from stream
+            result = subprocess.run(
+                ffmpeg_cmd,
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minute timeout
+            )
+            
+            if result.returncode != 0:
+                # If ffmpeg fails (e.g., unsupported URL), try yt-dlp as fallback
+                raise Exception(f"ffmpeg failed: {result.stderr}")
+                
+        except Exception as ffmpeg_error:
+            # Fallback: try yt-dlp for YouTube/other platforms
+            transcription_jobs[job_id]["status"] = "downloading"
+            
             ydl_opts = {
                 'format': 'bestaudio/best',
-                'outtmpl': file_path,
+                'outtmpl': audio_path,
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
                     'preferredcodec': 'mp3',
                     'preferredquality': '192',
-                }] if False else [],  # Download video, extract audio later if needed
+                }],
                 'quiet': True,
                 'no_warnings': True,
             }
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                downloaded_file = ydl.prepare_filename(info)
-                # Update file_path if yt-dlp changed extension
-                if os.path.exists(downloaded_file):
-                    file_path = downloaded_file
-                elif os.path.exists(file_path):
-                    pass
-                else:
-                    # Try to find the downloaded file
-                    base_path = file_path.rsplit('.', 1)[0]
-                    for ext in ['.mp4', '.webm', '.mkv', '.mp3', '.m4a']:
-                        if os.path.exists(base_path + ext):
-                            file_path = base_path + ext
-                            break
-        except Exception as ydl_error:
-            # Fallback: try direct download with requests
-            if not os.path.exists(file_path):
-                response = requests.get(url, stream=True, timeout=60)
-                response.raise_for_status()
-                
-                with open(file_path, 'wb') as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        f.write(chunk)
+                ydl.download([url])
+        
+        # Check if audio file was created
+        if not os.path.exists(audio_path):
+            raise Exception("Failed to extract audio from URL")
         
         transcription_jobs[job_id]["status"] = "processing"
         
-        # Transcribe
-        result = model.transcribe(file_path)
+        # Transcribe the audio
+        result = model.transcribe(audio_path)
         
         transcription_jobs[job_id]["status"] = "completed"
         transcription_jobs[job_id]["text"] = result["text"]
         transcription_jobs[job_id]["segments"] = result.get("segments", [])
         
         # Cleanup
-        os.remove(file_path)
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
+        if os.path.exists(file_path):
+            os.remove(file_path)
         
     except Exception as e:
         transcription_jobs[job_id]["status"] = "failed"
         transcription_jobs[job_id]["error"] = str(e)
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
         if os.path.exists(file_path):
             os.remove(file_path)
